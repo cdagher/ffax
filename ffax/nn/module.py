@@ -16,11 +16,15 @@ class Module(eqx.Module):
     _goodness_fn: Callable[[Any], float]
     _opt_state: PyTree
 
+    _theta: float = eqx.field(static=True)
+
     def __init__(
             self,
             layer: eqx.Module,
             activation: Optional[Callable[[Any], Any]] = None,
-            goodness_fn: Optional[Callable[[Any], float]] = None):
+            goodness_fn: Optional[Callable[[Any], float]] = None,
+            theta: float = 1.0
+        ):
         """
         Args:
             layer: The layer to be wrapped.
@@ -30,10 +34,17 @@ class Module(eqx.Module):
         super().__init__()
         
         self._layer = layer
+        
+        self._theta = theta
+        
         self._activation = activation or (lambda x: x) # default to identity (linear activation)
         self._goodness_fn = goodness_fn or (lambda x: jnp.mean(jnp.square(x))) # default to mean squared activation
 
         self._opt_state = None
+
+    @property
+    def theta(self) -> float:
+        return self._theta
 
     @eqx.filter_jit
     def forward(self, x: Array) -> Array:
@@ -61,7 +72,10 @@ class Module(eqx.Module):
         
         g = self._goodness_fn(x)
 
-        return g, x
+        # probability of goodness
+        p_g = jax.nn.sigmoid(g - self._theta)
+
+        return p_g, (g, x)
 
     @eqx.filter_jit
     def _updates(
@@ -73,13 +87,13 @@ class Module(eqx.Module):
 
         # Perform a forward pass, get the goodness and the output, as well as the gradient
         (out), grad = eqx.filter_value_and_grad(self._forward_pass, has_aux=True)(self._layer, x)
-        g, y = out
+        p_g, (g, y) = out
 
         updates, opt_state = opt.update(
             grad, opt_state, eqx.filter(self._layer, eqx.is_array)
         )
 
-        return (g, y), updates, opt_state
+        return p_g, (g, y), updates, opt_state
 
     def train_step(
             self,
@@ -102,7 +116,7 @@ class Module(eqx.Module):
         if self._opt_state is None:
             self = eqx.tree_at(lambda m: m._opt_state, self, opt.init(eqx.filter(self._layer, eqx.is_array)))
 
-        out, updates, opt_state = self._updates(x, opt, self._opt_state)
+        p_g, out, updates, opt_state = self._updates(x, opt, self._opt_state)
         g, y = out
 
         # we want to increase goodness in a positive pass,
@@ -115,4 +129,4 @@ class Module(eqx.Module):
 
         self = eqx.tree_at(lambda m: m._layer, self, eqx.apply_updates(self._layer, updates))
 
-        return (g, y), self
+        return (p_g, g, y), self
