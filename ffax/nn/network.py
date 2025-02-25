@@ -89,7 +89,7 @@ class Network:
         return s
 
 
-    @eqx.filter_jit
+    # @eqx.filter_jit
     def forward(self, x: Array) -> Array:
         """
         Perform a forward pass on self.
@@ -100,8 +100,8 @@ class Network:
         Returns:        
             The output data.
         """
-        for layer in self._layers:
-            self._g_scores[layer] = layer.goodness(x)
+        for i, layer in enumerate(self._layers):
+            self._g_scores[i] = layer.goodness(x)
             x = layer.forward(x)
         
         return x
@@ -109,37 +109,50 @@ class Network:
     def train_layer(
             self,
             i: int,
-            x: Array,
-            positive: bool
+            x_p: Array,
+            x_n: Array,
+            batch: bool = False,
+            batch_index: Optional[int] = None
         ) -> Tuple[float, Array]:
         """
         Train the i-th layer of the network.
 
         Args:
             i: The index of the layer to be trained.
-            x: The input data.
-            positive: Whether `x` is a positive or negative example.
+            x_p: The positive example.
+            x_n: The negative example.
+            batch: Whether to treat `x` as a batch of data.
+            batch_index: The batch index of `x`.
 
         Returns:
             The goodness score and the output of the layer.
         """
+        if batch and batch_index is None:
+            raise ValueError("batch_index must be specified when batch is True")
+
         # Get the layer to be trained
         layer = self._layers[i]
         
         # Perform a forward pass, get the goodness and the output
-        out, layer = layer.train_step(x, positive, self._opt)
-        p_g, g, y = out
+        out, layer = layer.train_step(
+            x_p,
+            x_n,
+            self._opt,
+            batch,
+            batch_index
+        )
+        loss, (g_pos, g_neg) = out
 
         self._layers[i] = layer
-        self._g_scores[i] = p_g
+        # self._g_scores[i] = p_g
 
         # If the layer fully trained, remove it from the list of trainable layers
-        if positive and np.abs(layer.theta - p_g) < TRAIN_EPSILON:
-            self._trainable_layers.remove(i)
-        elif not positive and np.abs(p_g - layer.theta) < TRAIN_EPSILON:
-            self._trainable_layers.remove(i)
+        # if positive and np.abs(layer.theta - p_g) < TRAIN_EPSILON:
+        #     self._trainable_layers.remove(i)
+        # elif not positive and np.abs(p_g - layer.theta) < TRAIN_EPSILON:
+        #     self._trainable_layers.remove(i)
 
-        return p_g, g, y
+        return loss, g_pos, g_neg
     
     def train_sequential(
             self,
