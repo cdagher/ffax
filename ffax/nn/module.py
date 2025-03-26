@@ -38,7 +38,7 @@ class Module(eqx.Module):
         self._theta = theta
         
         self._activation = activation or (lambda x: jax.nn.relu(x)) # default to relu
-        self._goodness_fn = goodness_fn or (lambda x: jnp.mean(jnp.square(x))) # default to mean squared activation
+        self._goodness_fn = goodness_fn or (lambda x: jnp.mean(jnp.square(x), axis=-1)) # default to mean squared activation
 
         self._opt_state = None
 
@@ -75,8 +75,8 @@ class Module(eqx.Module):
             The goodness score and the output data.
         """
 
-        dir_p = x_p / (jnp.linalg.norm(x_p, ord=2) + 1e-4)
-        dir_n = x_n / (jnp.linalg.norm(x_n, ord=2) + 1e-4)
+        dir_p = x_p / (jnp.linalg.norm(x_p) + 1e-4)
+        dir_n = x_n / (jnp.linalg.norm(x_n) + 1e-4)
 
         g_pos = self._goodness_fn(
             self._activation(
